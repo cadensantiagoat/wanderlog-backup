@@ -2,9 +2,8 @@ name: Daily Wanderlog Backup
 
 on:
   schedule:
-    # Runs automatically every day at 06:00 UTC (1:00 AM EST)
     - cron: '0 6 * * *'
-  workflow_dispatch: # Enables a manual trigger button in GitHub
+  workflow_dispatch:
 
 jobs:
   backup:
@@ -24,15 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Reconstruct Credentials File
-        env:
-          GOOGLE_CRED_DATA: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-        run: |
-          echo "$GOOGLE_CRED_DATA" > credentials.json
-
       - name: Execute Backup Script
         env:
           WANDERLOG_AUTH: ${{ secrets.WANDERLOG_AUTH }}
           WANDERLOG_TRIP_ID: ${{ secrets.WANDERLOG_TRIP_ID }}
           GOOGLE_DOC_ID: ${{ secrets.GOOGLE_DOC_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: python backup.py
