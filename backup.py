@@ -164,9 +164,22 @@ def update_google_doc(text_content):
     print("Authenticating with Google...")
     
     scopes = ['https://www.googleapis.com/auth/documents']
-    creds = service_account.Credentials.from_service_account_file(
-        GOOGLE_CREDENTIALS_FILE, scopes=scopes)
-        
+    
+    # Check if credentials are passed via environment variable (GitHub Actions)
+    env_creds = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    
+    if env_creds:
+        try:
+            creds_dict = json.loads(env_creds)
+            creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse GOOGLE_CREDENTIALS_JSON environment variable. Check your GitHub Secret content. Error: {e}")
+    elif os.path.exists(GOOGLE_CREDENTIALS_FILE):
+        # Fallback to local file for testing on your machine
+        creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=scopes)
+    else:
+        raise FileNotFoundError("No Google credentials found in environment variables or credentials.json file.")
+
     service = build('docs', 'v1', credentials=creds)
     
     print(f"Accessing Google Doc: {DOC_ID}...")
