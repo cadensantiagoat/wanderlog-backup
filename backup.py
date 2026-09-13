@@ -53,91 +53,108 @@ def fetch_wanderlog_data():
     
     return raw_json_data
 
+import json
+import re
+
+def extract_text_from_ops(text_obj):
+    """Helper to extract clean text from Wanderlog/Quill rich-text ops."""
+    if not isinstance(text_obj, dict):
+        return ""
+    ops = text_obj.get('ops')
+    if not isinstance(ops, list):
+        return ""
+    
+    text_pieces = []
+    for op in ops:
+        if isinstance(op, dict):
+            insert_val = op.get('insert')
+            if isinstance(insert_val, str):
+                text_pieces.append(insert_val)
+    return "".join(text_pieces)
+
+
 def format_trip_data(trip_json):
     """Parses Wanderlog JSON and formats it into indented lists and text blocks."""
     print("Formatting trip data into readable lists...")
     
     document_text = "WANDERLOG TRIP BACKUP\n=====================\n\n"
     
-    # 1. Helper function to recursively find all lists in the raw JSON
+    # 1. Helper function to recursively find all sections in the JSON tree
     def find_sections(data):
         sections = []
         if isinstance(data, dict):
-            # We found a section if it has a 'heading' and either 'blocks' (for places) or 'text' (for general notes)
+            # A section has a 'heading' and either 'blocks' or 'text'
             if 'heading' in data and ('blocks' in data or 'text' in data):
                 sections.append(data)
-            # Keep searching deeper
             for key, value in data.items():
                 sections.extend(find_sections(value))
         elif isinstance(data, list):
-            # If it's a list, search every item inside it
             for item in data:
                 sections.extend(find_sections(item))
         return sections
 
-    # 2. Extract all the sections using our helper function
     all_lists = find_sections(trip_json)
+    processed_headings = set()
     
     for section in all_lists:
-        # Get the heading (e.g., "Tokyo - Hotels" or "Notes")
         heading = section.get('heading', '').strip()
         if not heading:
             continue
             
-        document_text += f"{heading.upper()}\n"
-        document_text += "-" * len(heading) + "\n"
+        section_body = ""
         
-        # --- NEW: Extract section-level text (like your main "Notes" section) ---
+        # A. Check for section-level text (e.g. standalone Notes section)
         section_text_obj = section.get('text')
-        if isinstance(section_text_obj, dict) and 'ops' in section_text_obj:
-            # We don't strip() here so we keep Wanderlog's intended line breaks
-            ops_text = "".join([op.get('insert', '') for op in section_text_obj['ops'] if isinstance(op.get('insert'), str)])
-            if ops_text.strip():
-                document_text += f"{ops_text}\n"
-        
-        # 3. Loop through the "blocks" array to find places
+        notes_text = extract_text_from_ops(section_text_obj)
+        if notes_text.strip():
+            section_body += notes_text.strip() + "\n\n"
+            
+        # B. Check for places/blocks inside the section
         blocks = section.get('blocks', [])
         place_index = 1
         
         for block in blocks:
-            # If it's a Place
             if block.get('type') == 'place':
                 place_info = block.get('place', {})
                 place_name = place_info.get('name', 'Unknown Location')
                 
-                document_text += f"{place_index}. {place_name}\n"
+                section_body += f"{place_index}. {place_name}\n"
                 
-                # Extract and indent the address
+                # Address
                 address = place_info.get('formatted_address') or place_info.get('address')
                 if address:
-                    document_text += f"\tAddress: {address}\n"
+                    section_body += f"\tAddress: {address}\n"
                     
-                # Extract and indent the notes attached to the place
-                note = block.get('description') or block.get('note') or place_info.get('userNote')
-                text_obj = block.get('text')
+                # Place-specific notes
+                place_note = extract_text_from_ops(block.get('text'))
+                fallback_note = block.get('description') or block.get('note') or place_info.get('userNote')
                 
-                if isinstance(text_obj, dict) and 'ops' in text_obj:
-                    ops_text = "".join([op.get('insert', '') for op in text_obj['ops'] if isinstance(op.get('insert'), str)]).strip()
-                    if ops_text:
-                        document_text += f"\tNotes: {ops_text}\n"
-                elif isinstance(note, str) and note.strip():
-                    document_text += f"\tNotes: {note.strip()}\n"
+                if place_note.strip():
+                    section_body += f"\tNotes: {place_note.strip()}\n"
+                elif isinstance(fallback_note, str) and fallback_note.strip():
+                    section_body += f"\tNotes: {fallback_note.strip()}\n"
                     
                 place_index += 1
                 
-            # If there are standalone text blocks mixed into the places
             elif block.get('type') == 'text' or 'text' in block:
-                text_obj = block.get('text')
-                if isinstance(text_obj, dict) and 'ops' in text_obj:
-                    ops_text = "".join([op.get('insert', '') for op in text_obj['ops'] if isinstance(op.get('insert'), str)])
-                    if ops_text.strip():
-                        document_text += f"{ops_text}\n"
-                        
-        # Add a blank line between sections
-        document_text += "\n"
-        
-    # Sanitize the final string to prevent Google Docs from crashing
-    safe_string = re.sub(r'[^\x20-\x7E\n\t]', '', document_text)
+                block_text = extract_text_from_ops(block.get('text'))
+                if block_text.strip():
+                    section_body += f"{block_text.strip()}\n\n"
+
+        # ONLY add section to document if actual content was found
+        if section_body.strip():
+            heading_key = heading.upper()
+            
+            # Print diagnostic info to terminal
+            print(f" -> Capturing section: '{heading}' ({len(section_body.strip())} chars)")
+            
+            document_text += f"{heading_key}\n"
+            document_text += "-" * len(heading) + "\n"
+            document_text += section_body.strip() + "\n\n\n"
+            processed_headings.add(heading_key)
+            
+    # Sanitize ONLY harmful ASCII control characters (keeps normal letters, unicode, and line breaks)
+    safe_string = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', document_text)
     
     return safe_string
 
