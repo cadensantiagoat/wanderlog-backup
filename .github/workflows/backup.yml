@@ -25,8 +25,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Reconstruct Credentials File
+        env:
+          GOOGLE_CRED_DATA: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
-          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+          echo "$GOOGLE_CRED_DATA" > credentials.json
 
       - name: Execute Backup Script
         env:
